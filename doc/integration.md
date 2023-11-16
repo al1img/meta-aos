@@ -2,12 +2,12 @@
 
 ## Prerequisite
 
-* meta-aos was verified and tested on Yocto 3.1 (Dunfell);
+* meta-aos was verified and tested on Yocto 4.0 (Kirkstone) and 3.1 (Dunfell);
 * required additional meta layers: meta-virtualization, meta-security;
 * init manager: systemd;
 * required distro features: virtualization, seccomp;
-* kernel options (modules or builtin): bridge, nf_conncount, nfnetlink, overlay, veth, xt_addrtype, xt_comment,
-xt_conntrack, xt_masquerade, squashfs (additionally required by OTA update);
+* kernel options (modules or builtin): bridge, nf_conncount, nfnetlink, overlay, squashfs, veth, xt_addrtype,
+xt_comment, xt_conntrack, xt_masquerade
 * dedicated RW partition to store Aos services, layers and OTA update artifacts.
 
 ## Main components integration
@@ -40,10 +40,10 @@ Systemd should be set as system init manager:
 INIT_MANAGER = "systemd"
 ```
 
-Virtualization and seccomp distro features should be enabled in `local.conf`:
+Virtualization and security distro features should be enabled in `local.conf`:
 
 ```bash
-DISTRO_FEATURES:append = " virtualization seccomp"
+DISTRO_FEATURES:append = " virtualization security"
 ```
 
 The required kernel options should be enabled in kernel config as modules or builtin. See [Yocto Project Linux Kernel
@@ -103,7 +103,7 @@ implementation as reference example how to configure PKCS11 secure module in `ao
 
 [aos-rcar-gen3][aos-rcar-gen3] and [aos-rcar-gen4][aos-rcar-gen4] products use
 [OP-TEE](https://optee.readthedocs.io/en/latest/) PKCS11 implementation. It can be used as reference for ARM based
-custom boards.
+custom boards. See this product `aos-iamanager` configuration for more details.
 
 ## Aos disk encryption
 
@@ -116,7 +116,41 @@ However, `meta-aos` provide own implementation for disk encryption and disk open
 called by `aos-iamanager` during provisioning to encrypt disk and used by Aos `initramfs` to open the disk. Although
 the disk can be opened by the init manager, in Aos example products it is opened in Aos `initramfs` because it is
 required by Aos update reference implementation. See `aos-iamanager` and `initramfs` configurations in
-[aos-vm][aos-vm] reference product.
+[aos-vm][aos-vm], [aos-rcar-gen3][aos-rcar-gen3] and [aos-rcar-gen4][aos-rcar-gen4] reference products.
+
+Aos disk encryption required empty partition to be present in the image. During provisioning, `aos-iamanager` encrypts
+this partition and creates required logical disks on this partition using `aos-setupdisk` recipe. The encrypted
+partition is being opened in Aos initramfs on startup using dedicated (`opendisk`) initramfs script. This script should
+be included in the Aos initramfs and properly configure with dedicated initramfs command line options. See `opendisk`
+script implementation in `initramfs-framework` recipe.
+
+## Aos initramfs
+
+Aos initramfs implements different Aos system functionalities such as opening encrypted Aos partition, update rootfs
+using `overlayfs` approach etc. In order to use these functionality, the Aos initramfs should be enabled in the build by
+setting the following variables in `local.conf`:
+
+```bash
+INITRAMFS_IMAGE = "aos-image-initramfs"
+INITRAMFS_IMAGE_BUNDLE = "0"
+INITRAMFS_FSTYPES = "cpio.gz"
+```
+
+It consists of different Aos initramfs scripts locate in `initramfs-framework` recipe. Selection of the required scripts
+could be done by customizing `aos-image-initramfs` recipe. These script should be properly configured using initramfs
+command line option. The options are described in the corresponding script implementation. See [aos-vm][aos-vm],
+[aos-rcar-gen3][aos-rcar-gen3] and [aos-rcar-gen4][aos-rcar-gen4] reference products.
+
+## Enable SELinux (optional)
+
+Optionally SELinux can be enabled by adding the following configuration:
+
+```bash
+DISTRO_FEATURES:append = " acl xattr pam selinux"
+```
+
+If enabled, you would, probably, need to adjust SELinux policy according to your build requirements.
+The used policy is hosted in [refpolicy][refpolicy] repo.
 
 ## Integrate Aos VIS (optional)
 
@@ -128,7 +162,7 @@ Aos VIS with default configuration can be added into the target system by append
 `local.conf`:
 
 ```bash
-IMAGE_INSTALL:append = " aos-vis aos-iamanager aos-communicationmanager aos-servicemanager aos-provfirewall"
+IMAGE_INSTALL:append = " aos-vis"
 ```
 
 In order to get unit identification from VIS, `visidentifier` plugin should be set in aos-iamanger and aos-iamanger
@@ -155,6 +189,105 @@ switching A/B partition is done by using U-Boot environment variables.
 
 For a custom component update, the appropriate `aos-updatemanager` shall be implemented and integrated.
 
+Reference Aos FOTA implementation requires readonly rootfs. It can be enabled by setting the following variable in
+`local.conf`:
+
+```bash
+IMAGE_FEATURES:append = " read-only-rootfs"
+```
+
+`meta-aos` provides base Aos image recipe with RO rootfs and generating required for FOTA versioning files. You can
+simple use it as your image file or include it in your own image file:
+
+```bash
+require recipes-core/images/aos-image.inc
+```
+
+See [aos-vm][aos-vm] for reference.
+
+## Integration using moulin meta build system
+
+Please see  moulin documentation [moulin][moulin] for getting information about `moulin` build system.
+
+In the case of the usage of the moulin, part of the previously described steps should be put into the YAML file as shown
+below. Pay attention, part of the changes should be implemented inside Yocto's recipes.
+
+Example of the YAML file with options required to integrate AOS components into the custom build (`bsp_name`):
+
+```yaml
+variables:
+  YOCTOS_WORK_DIR: "yocto"
+  BSP_BUILD_DIR: "build_bsp"
+
+components:
+  bsp_name:
+    build-dir: "%{YOCTOS_WORK_DIR}"
+    default: true
+    sources:
+      # list required repos with revisions
+      # ...
+    builder:
+      type: yocto
+      work_dir: "%{BSP_BUILD_DIR}"
+      conf:
+        # Initramfs configuration
+        - [INITRAMFS_IMAGE, "aos-image-initramfs"]
+        - [INITRAMFS_IMAGE_BUNDLE, "0"]
+        - [INITRAMFS_FSTYPES, "cpio.gz"]
+        - [INIT_MANAGER, "systemd"]
+        - [DISTRO_FEATURES:append, " virtualization security"]
+        # selinux is optional
+        - [DISTRO_FEATURES:append, " acl xattr pam selinux"]
+        - [IMAGE_INSTALL:append, " aos-iamanager aos-provfirewall aos-communicationmanager aos-servicemanager aos-updatemanager"]
+        # AOS VIS is optional
+        - [IMAGE_INSTALL:append, " aos-vis"]
+        # AOS FOTA specific option
+        - [IMAGE_FEATURES:append, " read-only-rootfs"]
+
+        # add other variables if required
+        # ...
+
+      layers:
+        - "../poky/meta"
+        - "../poky/meta-poky"
+        - "../poky/meta-yocto-bsp"
+        - "../meta-aos"
+        - "../meta-virtualization"
+        - "../meta-security"
+        - "../meta-openembedded/meta-oe"
+        - "../meta-openembedded/meta-filesystems"
+        - "../meta-openembedded/meta-python"
+        - "../meta-openembedded/meta-perl"
+        - "../meta-openembedded/meta-networking"
+        # add other required layers
+        # ...
+
+images:
+  full:
+    type: gpt
+    desc: "Aos full image"
+    partitions:
+      boot:
+        gpt_type: 21686148-6449-6E6F-744E-656564454649 # BIOS boot partition (kinda...)
+        type: vfat
+        size: 256 MiB
+        items:
+          # add your boot items
+          # ...
+
+      rootfs:
+        gpt_type: B921B045-1DF0-41C3-AF44-4C6F280D3FAE # Linux aarch64 root
+        type: raw_image
+        image_path: "%{YOCTOS_WORK_DIR}/build-%{NODE_ID}/tmp/deploy/images/%{MACHINE}/aos-vm-%{NODE_ID}-%{MACHINE}.ext4"
+
+      aos:
+        gpt_type: CA7D7CCB-63ED-4C53-861C-1742536059CC # LUKS partition
+        type: empty
+        size: 2048 MiB
+```
+
 [aos-vm]: https://github.com/aoscloud/meta-aos-vm
 [aos-rcar-gen3]: https://github.com/aoscloud/meta-aos-rcar-gen3
 [aos-rcar-gen4]: https://github.com/aoscloud/meta-aos-rcar-gen4
+[refpolicy]: https://github.com/aoscloud/refpolicy
+[moulin]: https://moulin.readthedocs.io/en/latest/
