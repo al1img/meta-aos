@@ -5,10 +5,10 @@ GO_IMPORT = "github.com/aoscloud/aos_message_proxy"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=86d3f3a95c324c9479bd8986968f4327"
 
-BRANCH = "develop"
+BRANCH = "intergrate_iam"
 SRCREV = "${AUTOREV}"
 
-SRC_URI = "git://${GO_IMPORT}.git;branch=${BRANCH};protocol=https"
+SRC_URI = "git://github.com/al1img/aos_message_proxy.git;branch=${BRANCH};protocol=https"
 
 SRC_URI += " \
     file://aos_messageproxy.cfg \
