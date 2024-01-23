@@ -4,11 +4,11 @@ Wants=network-online.target aos-iamanager.service
 After=network-online.target aos-iamanager.service
 ConditionPathExists=!/var/aos/.unprovisioned
 PartOf=aos.target
-ConditionPathExists=!/var/aos/.unprovisioned
+ConditionPathExists=/var/aos/.unprovisioned
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/aos_messageproxy -c /etc/aos/aos_messageproxy.cfg -v debug -j
+ExecStart=/usr/bin/aos_messageproxy -c /etc/aos/aos_messageproxy.cfg -provisioning -v debug -j
 Restart=always
 RestartSec=10
 
