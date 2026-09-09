@@ -1,0 +1,2 @@
+AOS_CORE_BRANCH = "main"
+AOS_CORE_SRCREV = "fedd4b58a28bf696a28149ba6aefe2f680dac1f3"
